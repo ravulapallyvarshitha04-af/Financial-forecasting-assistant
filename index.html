@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Financial Forecasting Assistant</title>
+<style>
+  :root { --ink:#1a1d24; --muted:#586070; --paper:#f1f3f8; --panel:#fff; --line:#d5dae6; --accent:#1f3f8a; --good:#1b6b3a; --goodbg:#e2f1e8; --bad:#a4261d; --badbg:#fbe6e3; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  main { max-width:1020px; margin:0 auto; padding:32px 20px 64px; }
+  h1 { font:700 30px/1.2 Georgia,serif; margin:0 0 8px; } h2 { font:700 20px/1.3 Georgia,serif; margin:0 0 12px; }
+  h3 { font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin:18px 0 6px; }
+  .lede { color:var(--muted); max-width:70ch; margin:0 0 24px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:20px; margin-bottom:20px; }
+  .wrap { overflow-x:auto; } table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  th,td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; } th { font-size:13px; color:var(--muted); white-space:nowrap; } .num { text-align:right; }
+  input,select { font:inherit; color:var(--ink); padding:6px 8px; border:1px solid #a9b0c0; border-radius:4px; background:#fff; width:100%; min-width:100px; }
+  input[type=number] { text-align:right; } input:focus-visible,select:focus-visible,button:focus-visible { outline:3px solid #a9bdf0; outline-offset:1px; }
+  .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px 16px; margin-bottom:16px; } .grid label { display:block; font-size:13px; color:var(--muted); margin-bottom:4px; }
+  .controls { display:flex; flex-wrap:wrap; gap:12px 20px; margin-top:16px; }
+  button { font:inherit; font-weight:600; padding:9px 16px; border-radius:4px; cursor:pointer; border:1px solid var(--accent); background:#fff; color:var(--accent); }
+  button.primary { background:var(--accent); color:#fff; } button:disabled { opacity:.6; cursor:progress; }
+  #status { margin:12px 0 0; min-height:1.5em; color:var(--muted); } #status.error { color:var(--bad); }
+  .note,.small { color:var(--muted); font-size:13px; } .note { margin:10px 0 0; }
+  .tag { display:inline-block; padding:2px 8px; border-radius:3px; font-size:13px; font-weight:600; } .tag.ok { background:var(--goodbg); color:var(--good); } .tag.bad { background:var(--badbg); color:var(--bad); }
+  .warn { background:var(--badbg); color:var(--bad); border-radius:4px; padding:10px 12px; margin-bottom:12px; font-weight:600; }
+  ul.checks { list-style:none; margin:0; padding:0; } ul.checks li { padding:8px 0; border-bottom:1px solid var(--line); }
+  .commentary { white-space:pre-wrap; max-width:76ch; }
+  @media (max-width:700px) { h1 { font-size:24px; } .grid { grid-template-columns:1fr; } button.primary { width:100%; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Financial forecasting assistant</h1>
+  <p class="lede">Enter several periods of revenue (and optionally operating profit), choose a growth assumption, and the app builds low, base and high scenarios and a linear-trend cross-check in code, so every number is exact and traceable. Claude then explains the results using a written Skill (SKILL.md). Projections are conditional on your assumptions. They are not predictions or advice.</p>
+  <section class="panel">
+    <h2>Your figures</h2>
+    <div class="grid">
+      <div><label for="company">Company name (optional)</label><input id="company" type="text" maxlength="80"></div>
+      <div><label for="unit">Unit of the figures</label><select id="unit"><option>Rs</option><option>Rs thousands</option><option>Rs lakhs</option><option selected>Rs crore</option><option>Rs millions</option></select></div>
+      <div><label for="horizon">Forecast periods (1 to 5)</label><input id="horizon" type="number" min="1" max="5" step="1" value="3"></div>
+    </div>
+    <h3>History, oldest period first (3 to 6 periods)</h3>
+    <div class="wrap"><table><thead><tr><th>Period label</th><th class="num">Revenue</th><th class="num">Operating profit (EBIT, optional)</th></tr></thead><tbody id="hist"></tbody></table></div>
+    <h3>Assumptions</h3>
+    <div class="grid">
+      <div><label for="method">Growth method</label><select id="method"><option>Historical CAGR</option><option>My own growth rate</option></select></div>
+      <div><label for="manual">Your growth rate % a period (if chosen)</label><input id="manual" type="number" step="any"></div>
+      <div><label for="spread">Scenario spread, percentage points</label><input id="spread" type="number" step="any" value="3"></div>
+      <div><label for="margin">EBIT margin % (blank = latest historical)</label><input id="margin" type="number" step="any"></div>
+      <div><label for="tax">Tax rate %</label><input id="tax" type="number" step="any" value="25"></div>
+    </div>
+    <div class="controls"><button type="button" id="run" class="primary">Build forecast</button><button type="button" id="clear">Clear all figures</button></div>
+    <p id="status" role="status"></p>
+    <p class="note">Constant growth and margin are applied in each scenario. NOPAT is EBIT after tax; interest is not modelled. The values shown are sample figures for a fictional company.</p>
+  </section>
+  <section id="results" hidden>
+    <div class="panel"><h2>Historical performance</h2><div id="r-hist"></div></div>
+    <div class="panel"><h2>Forecast scenarios</h2><div id="r-sc"></div></div>
+    <div class="panel"><h2>Linear-trend cross-check</h2><div id="r-lin"></div></div>
+    <div class="panel"><h2>Assumption checks</h2><div id="checks"></div></div>
+    <div class="panel"><h2>Commentary</h2><div id="commentary" class="commentary"></div></div>
+  </section>
+</main>
+<script>
+  const SAMPLE = [["FY2021",700,100],["FY2022",800,115],["FY2023",900,130],["FY2024",1000,150],["FY2025",1200,190]];
+  const $ = id => document.getElementById(id);
+  const el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x !== undefined) e.textContent = x; return e; };
+  const n2 = v => v === null || v === undefined ? "-" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  const pc = v => v === null || v === undefined ? "-" : n2(v) + "%";
+  function build(sample) {
+    const b = $("hist"); b.textContent = "";
+    for (let i = 0; i < 6; i++) {
+      const tr = el("tr"); ["label", "revenue", "ebit"].forEach((k, j) => { const td = el("td", j ? "num" : ""), inp = el("input"); inp.type = j ? "number" : "text"; if (j) inp.step = "any";
+        inp.dataset.i = i; inp.dataset.k = k; inp.setAttribute("aria-label", k + " period " + (i + 1)); if (sample && SAMPLE[i]) inp.value = SAMPLE[i][j]; td.appendChild(inp); tr.appendChild(td); }); b.appendChild(tr);
+    }
+  }
+  build(true); $("company").value = "Sample Industries Ltd (fictional)";
+  $("clear").addEventListener("click", () => { build(false); $("company").value = ""; $("manual").value = ""; $("margin").value = ""; });
+  function table(heads, rows) {
+    const w = el("div", "wrap"), t = el("table"), hr = el("tr"); heads.forEach((h, i) => hr.appendChild(el("th", i ? "num" : "", h)));
+    const th = el("thead"); th.appendChild(hr); t.appendChild(th); const tb = el("tbody");
+    rows.forEach(r => { const tr = el("tr"); r.forEach((c, i) => tr.appendChild(el("td", i ? "num" : "", c))); tb.appendChild(tr); }); t.appendChild(tb); w.appendChild(t); return w;
+  }
+  function render(d) {
+    const a = d.assumptions, s = d.stats;
+    const h = $("r-hist"); h.textContent = "";
+    h.appendChild(table(["Period", "Revenue", "Growth", "EBIT", "EBIT margin"], d.history.map(x => [x.label, n2(x.revenue), pc(x.growthPct), n2(x.ebit), pc(x.marginPct)])));
+    h.appendChild(el("p", "note", "Amounts in " + d.unit + ". Revenue CAGR " + pc(s.cagrPct) + " over " + (s.periods - 1) + " intervals; period growth ranged from " + pc(s.minGrowthPct) + " to " + pc(s.maxGrowthPct) + (s.avgMarginPct !== null ? "; average EBIT margin " + pc(s.avgMarginPct) : "") + "."));
+    const c = $("r-sc"); c.textContent = "";
+    c.appendChild(el("p", "note", "Method: " + a.method + ". Base growth " + pc(a.baseGrowthPct) + ", spread " + n2(a.spreadPp) + " points, EBIT margin " + pc(a.marginPct) + " (" + a.marginSource + "), tax " + pc(a.taxPct) + "."));
+    const labels = d.scenarios[1].years.map(y => y.label);
+    c.appendChild(table(["Scenario", "Growth", ...labels.map(l => l + " revenue")], d.scenarios.map(x => [x.name, pc(x.growthPct), ...(x.reason ? labels.map(() => "-") : x.years.map(y => n2(y.revenue)))])));
+    c.appendChild(el("h3", "", "Base scenario profit"));
+    c.appendChild(table(["Item", ...labels], [["EBIT", ...d.scenarios[1].years.map(y => n2(y.ebit))], ["NOPAT (EBIT after tax)", ...d.scenarios[1].years.map(y => n2(y.nopat))]]));
+    const l = $("r-lin"); l.textContent = "";
+    l.appendChild(table(["", ...labels], [["Linear-trend revenue", ...d.linear.years.map(y => y.revenue === null ? "Not meaningful" : n2(y.revenue))]]));
+    l.appendChild(el("p", "note", "Trend adds " + n2(d.linear.slopePerPeriod) + " a period. Average fit error against history: " + pc(d.linear.mapePct) + " for the linear trend and " + pc(d.cagrMapePct) + " for the compound-growth path. Lower fit error describes the past only."));
+    const ck = $("checks"); ck.textContent = ""; const bad = d.checks.filter(x => x.status === "mismatch");
+    if (bad.length) ck.appendChild(el("div", "warn", bad.length + " check(s) outside range. Verify these assumptions before relying on the forecast."));
+    const ul = el("ul", "checks");
+    d.checks.forEach(x => { const li = el("li"); li.appendChild(el("span", "tag " + (x.status === "ok" ? "ok" : "bad"), x.status === "ok" ? "Within range" : "Outside range")); li.appendChild(document.createTextNode(" " + x.name)); li.appendChild(el("div", "small", x.detail)); ul.appendChild(li); });
+    ck.appendChild(ul);
+    const cm = $("commentary"); cm.textContent = "";
+    if (d.commentarySource === "template") cm.appendChild(el("p", "warn", "Claude commentary is unavailable (" + (d.commentaryError || "unknown reason") + "). This is a standard summary generated by code from the calculated results."));
+    cm.appendChild(document.createTextNode(d.commentary));
+    $("results").hidden = false; $("results").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  $("run").addEventListener("click", async () => {
+    const st = $("status"), btn = $("run"); st.className = ""; st.textContent = "Calculating and writing the commentary..."; btn.disabled = true;
+    try {
+      const body = { company: $("company").value, unit: $("unit").value, horizon: $("horizon").value, method: $("method").value, manualGrowthPct: $("manual").value, spreadPp: $("spread").value, marginPct: $("margin").value, taxPct: $("tax").value, history: [{}, {}, {}, {}, {}, {}] };
+      document.querySelectorAll("input[data-k]").forEach(i => { body.history[i.dataset.i][i.dataset.k] = i.value; });
+      const resp = await fetch("/api/forecast", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const text = await resp.text(); let data;
+      try { data = JSON.parse(text); } catch (e) { throw new Error("The server function was not found. Check that api/forecast.js is in your repository and redeploy."); }
+      if (!resp.ok) throw new Error(data.error || "Something went wrong.");
+      st.textContent = ""; render(data);
+    } catch (e) { st.className = "error"; st.textContent = e.message; } finally { btn.disabled = false; }
+  });
+</script>
+</body>
+</html>
